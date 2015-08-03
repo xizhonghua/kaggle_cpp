@@ -50,6 +50,9 @@ def process_user_purchase_list():
 def clean_dataset(d):
     c = d.copy()
     
+    c.drop('CAPSULE_TEXT', axis=1, inplace=True)
+    c.drop('large_area_name', axis=1, inplace=True)
+
     # drop date related fields
     c.drop('DISPFROM', axis=1, inplace=True)
     c.drop('DISPEND', axis=1, inplace=True)
@@ -77,23 +80,41 @@ def clean_dataset(d):
 
     a = np.array(c)
 
+   
+
     #TODO(zxi) using better encoder for categorical fields
+    cat_idx = []
     for i in range(a.shape[1]):
         if type(a[1,i]) is str:
             lbl = preprocessing.LabelEncoder()
             lbl.fit(a[:,i])
             a[:,i] = lbl.transform(a[:,i])
+            cat_idx.append(i)
+
+    encoder = preprocessing.OneHotEncoder(categorical_features=cat_idx, sparse=False)
+    print a.shape
+    a = encoder.fit_transform(a)
+    print a.shape
 
     # index = c.columns.get_loc("large_area_name")
-
     # print c['large_area_name'].shape
     # print a[:, index].shape
 
     scaler = preprocessing.StandardScaler()
     a = scaler.fit_transform(a)
-    # a = preprocessing.normalize(a)
 
     return a
+
+### Reweight dataset
+def reweight(array, df, weights):
+    c = array.copy()
+    for key in weights:
+        index = df.columns.get_loc(key)
+        c[:, index] = c[:, index] * weights[key]
+        print c[:, index]
+    return c
+
+
 
 users = pd.read_csv("../data/user_list.csv")
 print 'users.shape = ', users.shape
@@ -112,7 +133,6 @@ all_coupon = pd.concat([train_coupon, test_coupon], ignore_index=True)
 print "all_coupon shape = ", all_coupon.shape
 
 cleaned_coupon = clean_dataset(all_coupon)
-print cleaned_coupon[:, 0:9]
 print 'cleaned_coupon shape = ', cleaned_coupon.shape
 
 train = cleaned_coupon[0:train_coupon.shape[0], :]
@@ -140,11 +160,14 @@ recommands = []
 user_index = -1
 skipped = 0
 
-THRASHOLD = 0.3
+THRASHOLD = 1.0
+MAX_REC = 10
 
 for user_hash, withdrawn_date in zip(users['USER_ID_hash'], users['WITHDRAW_DATE']):
     user_index += 1
     recommand = []
+
+    #user_ken_name = user_ken_name.strip(' \t\n\r')
     
     #TODO(implement recommandation)
     # print withdrawn_date, type(withdrawn_date)
@@ -152,26 +175,40 @@ for user_hash, withdrawn_date in zip(users['USER_ID_hash'], users['WITHDRAW_DATE
         # normal users
         # ...
         # ...
-        # pcs =         
-        train_indics = [train_hash_to_index[pc_hash] for pc_hash in user_cps[user_hash]]
+        # pcs =   
         
-        count = len(train_indics)
-        # print 'purchased count = ', count
-        min_dist = np.min(D[train_indics,:], axis=0)
-        selected_index = min_dist < THRASHOLD
-        selected_cp = test_coupon[selected_index]['COUPON_ID_hash']
-        # print 'selected_cp.shape = ', selected_cp.shape
-        selected_dist = min_dist[selected_index]
+        if user_index < 1e9:             
+            train_indics = [train_hash_to_index[pc_hash] for pc_hash in user_cps[user_hash]]
+            
+            count = len(train_indics)
+            # print 'purchased count = ', count
+            dist = np.min(D[train_indics,:], axis=0)
+            selected_index = dist < THRASHOLD
+            selected_cp = np.array(test_coupon['COUPON_ID_hash'][selected_index])
+            # print 'selected_cp.shape = ', selected_cp.shape
+            selected_dist = dist[selected_index]
 
-        sorted_selected_index = np.argsort(selected_dist)
-        # print 'sorted_selected_index.shape = ', sorted_selected_index.shape, 'min = ', np.min(sorted_selected_index), 'max = ', np.max(sorted_selected_index)
-        # print 'sorted_selected_index', sorted_selected_index
+            sorted_selected_index = np.argsort(selected_dist)
 
-        sorted_selected_dist = selected_dist[sorted_selected_index]
-        sorted_selected_cp = selected_cp[sorted_selected_index]
-        
-        recommand = list(selected_cp)
-        print 'purcahse count = ', count, 'recomanded count = ', len(recommand)
+            sorted_selected_dist = selected_dist[sorted_selected_index]
+            sorted_selected_cp = selected_cp[sorted_selected_index]
+
+            #print sorted_selected_cp
+            #print test_coupon['ken_name'][selected_index]
+
+            # # filter by ken name
+            # for cp_hash in sorted_selected_cp:
+            #     test_index = test_hash_to_index[cp_hash]
+            #     cp_ken_name = test_coupon['ken_name'][test_index].strip(' \t\n\r')
+            #     print 'cp_ken_name = ', cp_ken_name
+            #     if cp_ken_name == user_ken_name:
+            #         recommand.append(cp_hash)
+
+            recommand = list(sorted_selected_cp)
+            recommand = recommand[0:min(len(recommand), MAX_REC)]
+            if len(recommand) < MAX_REC:                
+                print 'purcahse count = ', count, 'recomanded count = ', len(recommand)
+            # print '---------------------------------------------------------------'
 
     else:        
         skipped += 1
